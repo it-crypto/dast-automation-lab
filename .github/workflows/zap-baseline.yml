@@ -16,14 +16,14 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           target: "http://juice-shop.herokuapp.com"
-          fail_action: false     # so your workflow does not fail on alerts
+          fail_action: false
           allow_issue_writing: false
-          artifact_name: "zap-baseline-report"
+          artifact_name: "zap_baseline_report"   # <-- use _ not -
 
-      - name: Upload Report (HTML / JSON / MD)
+      - name: Upload Reports
         uses: actions/upload-artifact@v4
         with:
-          name: zap-baseline-report
+          name: zap_baseline_report           # <-- same as above, safe characters
           path: |
             report_html.html
             report_json.json
