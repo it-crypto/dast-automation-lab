@@ -1,7 +1,7 @@
 name: ZAP Baseline Scan
 
 on:
-  workflow_dispatch:      # Manual trigger
+  workflow_dispatch:
   push:
     branches:
       - main
@@ -12,13 +12,18 @@ jobs:
 
     steps:
       - name: ZAP Baseline Scan
-        uses: zaproxy/action-baseline@v0.8.0
+        uses: zaproxy/action-baseline@v0.12.0
         with:
+          token: ${{ secrets.GITHUB_TOKEN }}
           target: "http://juice-shop.herokuapp.com"
-          format: "html"
-          output: "zap-baseline-report.html"
+          fail_action: false     # so your workflow does not fail on alerts
+          artifact_name: "zap-baseline-report"
 
-      - name: Upload Report
-        uses: actions/upload-artifact@v5
+      - name: Upload Report (HTML / JSON / MD)
+        uses: actions/upload-artifact@v4
         with:
           name: zap-baseline-report
+          path: |
+            report_html.html
+            report_json.json
+            report_md.md
