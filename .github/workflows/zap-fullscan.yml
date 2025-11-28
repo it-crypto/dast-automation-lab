@@ -12,6 +12,7 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           target: "http://juice-shop.herokuapp.com"   # <-- plain ASCII hyphen
+          cmd_options: "-j -a -d"
           fail_action: false
           allow_issue_writing: false
           artifact_name: zap_fullscan_report
