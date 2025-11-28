@@ -18,13 +18,4 @@ jobs:
           target: "http://juice-shop.herokuapp.com"
           fail_action: false
           allow_issue_writing: false
-          upload_artifact: false # this is for disabling uploads
-
-      - name: Upload Reports
-        uses: actions/upload-artifact@v5
-        with:
-          name: zap_baseline_report           # <-- same as above, safe characters
-          path: |
-            report_html.html
-            report_json.json
-            report_md.md
+          artifact_name: zap_baseline_report   # <-- this overrides the default zap_scan
