@@ -1,22 +1,17 @@
 name: ZAP Full Scan
 
 on:
-  workflow_dispatch:   # manual trigger only (for safety)
+  workflow_dispatch:
 
 jobs:
-  zap-full-scan:
+  zap-fullscan:
     runs-on: ubuntu-latest
-
     steps:
       - name: ZAP Full Scan
-        uses: zaproxy/action-full-scan@v0.8.0
+        uses: zaproxy/action-full-scan@v0.13.0
         with:
-          target: "http://juice-shop.herokuapp.com"
-          format: "html"
-          output: "zap-fullscan-report.html"
-
-      - name: Upload Report
-        uses: actions/upload-artifact@v3
-        with:
-          name: zap-fullscan-report
-          path: zap-fullscan-report.html
+          token: ${{ secrets.GITHUB_TOKEN }}
+          target: "http://juice‑shop.herokuapp.com"
+          fail_action: false
+          allow_issue_writing: false
+          artifact_name: zap_fullscan_report
