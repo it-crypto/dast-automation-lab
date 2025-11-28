@@ -19,6 +19,6 @@ jobs:
           output: "zap-baseline-report.html"
 
       - name: Upload Report
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v5
         with:
           name: zap-baseline-report
