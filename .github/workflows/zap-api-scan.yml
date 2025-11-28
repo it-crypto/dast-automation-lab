@@ -11,13 +11,9 @@ jobs:
       - name: ZAP API Scan
         uses: zaproxy/action-api-scan@v0.10.0
         with:
-          target: "http://juice-shop.herokuapp.com"
-          apis: "https://raw.githubusercontent.com/OWASP/juice-shop/master/openapi.yaml"
-          format: "html"
-          output: "zap-api-report.html"
-
-      - name: Upload Report
-        uses: actions/upload-artifact@v5
-        with:
-          name: zap-api-report
-          path: zap-api-report.html
+          token: ${{ secrets.GITHUB_TOKEN }}
+          target: "https://raw.githubusercontent.com/OWASP/juice-shop/master/openapi.yaml"  # API definition
+          format: "openapi"   # must be openapi, soap, or graphql
+          fail_action: false
+          allow_issue_writing: false
+          artifact_name: zap_api_report
