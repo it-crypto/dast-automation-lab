@@ -18,7 +18,6 @@ jobs:
           target: "http://juice-shop.herokuapp.com"
           fail_action: false
           allow_issue_writing: false
-          #artifact_name: "zap_baseline_report"   # <-- use _ not -
 
       - name: Upload Reports
         uses: actions/upload-artifact@v5
