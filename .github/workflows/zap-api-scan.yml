@@ -17,7 +17,7 @@ jobs:
           output: "zap-api-report.html"
 
       - name: Upload Report
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v5
         with:
           name: zap-api-report
           path: zap-api-report.html
