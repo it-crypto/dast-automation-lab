@@ -3,8 +3,8 @@ name: ZAP Baseline Scan
 on:
   workflow_dispatch:
   push:
-    branches:
-      - main
+    #branches:
+     # - main
 
 jobs:
   zap-baseline:

@@ -8,10 +8,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: ZAP Full Scan
-        uses: zaproxy/action-full-scan@v0.13.0
+        uses: zaproxy/action-full-scan@v0.13.0   # latest available for full scan
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          target: "http://juice‑shop.herokuapp.com"
+          target: "http://juice-shop.herokuapp.com"   # <-- plain ASCII hyphen
           fail_action: false
           allow_issue_writing: false
           artifact_name: zap_fullscan_report
