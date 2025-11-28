@@ -1,0 +1,23 @@
+name: ZAP API Scan
+
+on:
+  workflow_dispatch:
+
+jobs:
+  zap-api-scan:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: ZAP API Scan
+        uses: zaproxy/action-api-scan@v0.8.0
+        with:
+          target: "http://juice-shop.herokuapp.com"
+          apis: "https://raw.githubusercontent.com/OWASP/juice-shop/master/openapi.yaml"
+          format: "html"
+          output: "zap-api-report.html"
+
+      - name: Upload Report
+        uses: actions/upload-artifact@v3
+        with:
+          name: zap-api-report
+          path: zap-api-report.html

@@ -1,0 +1,24 @@
+name: ZAP Baseline Scan
+
+on:
+  workflow_dispatch:      # Manual trigger
+  push:
+    branches:
+      - main
+
+jobs:
+  zap-baseline:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: ZAP Baseline Scan
+        uses: zaproxy/action-baseline@v0.8.0
+        with:
+          target: "http://juice-shop.herokuapp.com"
+          format: "html"
+          output: "zap-baseline-report.html"
+
+      - name: Upload Report
+        uses: actions/upload-artifact@v3
+        with:
+          name: zap-baseline-report
