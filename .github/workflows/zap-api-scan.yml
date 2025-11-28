@@ -9,7 +9,7 @@ jobs:
 
     steps:
       - name: ZAP API Scan
-        uses: zaproxy/action-api-scan@v0.8.0
+        uses: zaproxy/action-api-scan@v0.10.0
         with:
           target: "http://juice-shop.herokuapp.com"
           apis: "https://raw.githubusercontent.com/OWASP/juice-shop/master/openapi.yaml"
