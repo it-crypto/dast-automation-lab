@@ -68,6 +68,9 @@ jobs:
           echo "AUTH_COOKIE=$COOKIE" >> $GITHUB_ENV
           echo "Captured Cookie:"
           echo "$COOKIE"
+          echo "Testing cookie with /rest/user/whoami"
+          curl -i -H "Cookie: $AUTH_COOKIE" http://localhost:3000/rest/user/whoami
+
 
       # ---------------------------------------------------------
       # 5. Run Katana with authenticated session
@@ -77,13 +80,14 @@ jobs:
           echo "Using Cookie:"
           echo "$AUTH_COOKIE"
 
-          katana \
-            -u http://localhost:3000 \
-            -d 5 \
-            -jsl \
-            -header "Cookie: $AUTH_COOKIE" \
-            -silent \
-            -o discovered_urls.txt
+          kkatana \
+          -u http://localhost:3000 \
+           -d 5 \
+           -jsl \
+           -H "Cookie: $AUTH_COOKIE" \
+           -silent \
+           -o discovered_urls.txt
+
 
           echo "Total URLs discovered:"
           wc -l discovered_urls.txt
