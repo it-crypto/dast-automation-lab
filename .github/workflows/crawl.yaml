@@ -1,32 +1,28 @@
-name: Juice Shop Authenticated URL Discovery
+name: Juice Shop Authenticated Crawl
 
 on:
   workflow_dispatch:
   push:
 
 jobs:
-  auth-discover-urls:
+  auth-crawl:
     runs-on: ubuntu-latest
 
     steps:
-
-      # ---------------------------------------------------------
-      # 1. Checkout Repo
-      # ---------------------------------------------------------
       - name: Checkout Repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
 
       # ---------------------------------------------------------
-      # 2. Start Juice Shop in Docker
+      # 1️⃣ Start Juice Shop in Docker
       # ---------------------------------------------------------
-      - name: Run Juice Shop in Docker
+      - name: Run Juice Shop
         run: |
           docker run -d -p 3000:3000 --name juice-shop bkimminich/juice-shop
           echo "Waiting for Juice Shop to start..."
-          sleep 20
+          sleep 30  # ensure full startup
 
       # ---------------------------------------------------------
-      # 3. Install Katana (extract binary only)
+      # 2️⃣ Install Katana
       # ---------------------------------------------------------
       - name: Install Katana
         run: |
@@ -35,7 +31,7 @@ jobs:
           chmod +x /usr/local/bin/katana
 
       # ---------------------------------------------------------
-      # 4. Auto-register and login
+      # 3️⃣ Auto Register & Login
       # ---------------------------------------------------------
       - name: Auto Register and Login
         id: auth
@@ -47,47 +43,40 @@ jobs:
           echo "PASSWORD=$PASSWORD" >> $GITHUB_ENV
 
           echo "Registering user: $EMAIL"
-
-          # Register user
           curl -s -X POST http://localhost:3000/api/Users \
             -H "Content-Type: application/json" \
             -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\",\"securityQuestion\":{\"id\":1,\"answer\":\"test\"}}" \
             > register_response.json
-
-          echo "Registration response:"
           cat register_response.json
 
           echo "Logging in..."
-
-          # Login (capture auth cookie)
-          COOKIE=$(curl -i -s -X POST http://localhost:3000/rest/user/login \
+          # Login and capture all cookies
+          AUTH_COOKIE=$(curl -i -s -X POST http://localhost:3000/rest/user/login \
             -H "Content-Type: application/json" \
             -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\"}" \
-            | grep -i "set-cookie" | head -n1 | sed 's/.*: //')
+            | grep -i "set-cookie" \
+            | awk '{print $2}' \
+            | tr -d '\r\n' \
+            | tr '\n' ';')
+          echo "AUTH_COOKIE=$AUTH_COOKIE" >> $GITHUB_ENV
 
-          echo "AUTH_COOKIE=$COOKIE" >> $GITHUB_ENV
-          echo "Captured Cookie:"
-          echo "$COOKIE"
           echo "Testing cookie with /rest/user/whoami"
           curl -i -H "Cookie: $AUTH_COOKIE" http://localhost:3000/rest/user/whoami
 
-
       # ---------------------------------------------------------
-      # 5. Run Katana with authenticated session
+      # 4️⃣ Run Katana Authenticated Crawl
       # ---------------------------------------------------------
-      - name: Run Katana AUTHENTICATED Discovery
+      - name: Run Katana Authenticated Discovery
         run: |
-          echo "Using Cookie:"
-          echo "$AUTH_COOKIE"
+          echo "Using Cookie: $AUTH_COOKIE"
 
           katana \
-          -u http://localhost:3000 \
-           -d 5 \
-           -jsl \
-           -H "Cookie: $AUTH_COOKIE" \
-           -silent \
-           -o discovered_urls.txt
-
+            -u http://localhost:3000 \
+            -d 7 \
+            -jsl \
+            -H "Cookie: $AUTH_COOKIE" \
+            -silent \
+            -o discovered_urls.txt
 
           echo "Total URLs discovered:"
           wc -l discovered_urls.txt
@@ -96,9 +85,9 @@ jobs:
           cat discovered_urls.txt
 
       # ---------------------------------------------------------
-      # 6. Upload discovered URLs as artifact
+      # 5️⃣ Upload discovered URLs as artifact
       # ---------------------------------------------------------
-      - name: Upload discovered URLs
+      - name: Upload Discovered URLs
         uses: actions/upload-artifact@v5
         with:
           name: discovered_urls
