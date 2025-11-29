@@ -80,7 +80,7 @@ jobs:
           echo "Using Cookie:"
           echo "$AUTH_COOKIE"
 
-          kkatana \
+          katana \
           -u http://localhost:3000 \
            -d 5 \
            -jsl \
