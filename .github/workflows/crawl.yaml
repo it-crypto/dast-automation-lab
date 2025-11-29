@@ -2,18 +2,16 @@ name: Juice Shop Authenticated URL Discovery
 
 on:
   workflow_dispatch:
-  push:
 
 jobs:
   auth-crawl:
     runs-on: ubuntu-latest
 
     steps:
-
       # ---------------------------------------------------------
       # 1. Checkout Repo
       # ---------------------------------------------------------
-      - name: Checkout Repo
+      - name: Checkout Repository
         uses: actions/checkout@v3
 
       # ---------------------------------------------------------
@@ -23,10 +21,10 @@ jobs:
         run: |
           docker run -d -p 3000:3000 --name juice-shop bkimminich/juice-shop
           echo "Waiting for Juice Shop to start..."
-          sleep 30  # wait for full boot
+          sleep 20
 
       # ---------------------------------------------------------
-      # 3. Install Katana (JS-aware crawler)
+      # 3. Install Katana (JS-aware Web Crawler)
       # ---------------------------------------------------------
       - name: Install Katana
         run: |
@@ -57,39 +55,32 @@ jobs:
           echo "Registration response:"
           cat register_response.json
 
-          echo "Logging in..."
+          echo "Logging in and capturing cookie..."
 
-          # Login (capture full session cookie)
-          AUTH_COOKIE=$(curl -i -s -X POST http://localhost:3000/rest/user/login \
+          # Login and save cookie
+          curl -s -c cookie.txt -X POST http://localhost:3000/rest/user/login \
             -H "Content-Type: application/json" \
-            -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\"}" \
-            | grep -i "set-cookie" \
-            | awk -F': ' '{print $2}' \
-            | tr -d '\r' \
-            | paste -sd '; ' -)
-
-          echo "AUTH_COOKIE=$AUTH_COOKIE" >> $GITHUB_ENV
-          echo "Captured Cookie:"
-          echo "$AUTH_COOKIE"
+            -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\"}"
 
           echo "Testing cookie with /rest/user/whoami"
-          curl -i -H "Cookie: $AUTH_COOKIE" http://localhost:3000/rest/user/whoami
+          curl -i -b cookie.txt http://localhost:3000/rest/user/whoami
 
       # ---------------------------------------------------------
       # 5. Run Katana with authenticated session
       # ---------------------------------------------------------
       - name: Run Katana AUTHENTICATED Discovery
         run: |
-          echo "Using Cookie:"
-          echo "$AUTH_COOKIE"
+          # Extract connect.sid cookie
+          COOKIE=$(cat cookie.txt | grep connect.sid | awk '{print $7"="$8}')
+          echo "Using Cookie: $COOKIE"
 
+          # Run Katana crawler
           katana \
             -u http://localhost:3000 \
             -d 7 \
             -jsl \
-            -H "Cookie: $AUTH_COOKIE" \
+            -H "Cookie: $COOKIE" \
             -silent \
-            -wait 3 \
             -o discovered_urls.txt
 
           echo "Total URLs discovered:"
@@ -99,9 +90,9 @@ jobs:
           cat discovered_urls.txt
 
       # ---------------------------------------------------------
-      # 6. Upload Discovered URLs as Artifact
+      # 6. Upload discovered URLs as artifact
       # ---------------------------------------------------------
-      - name: Upload discovered URLs
+      - name: Upload Discovered URLs
         uses: actions/upload-artifact@v5
         with:
           name: discovered_urls
