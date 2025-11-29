@@ -1,138 +1,257 @@
-🧃 Juice Shop DAST Workflow Documentation
-Overview
+# 🧃 OWASP Juice Shop DAST Workflow
 
-This repository contains a Dynamic Application Security Testing (DAST) workflow for the OWASP Juice Shop
- application.
+## Overview
 
-The goal is to:
+This repository contains a **Dynamic Application Security Testing (DAST)** workflow designed for the OWASP Juice Shop application.
 
-Automatically spin up Juice Shop in a Docker container
+The workflow fully automates:
 
-Discover all reachable URLs (both public and authenticated)
+- Running Juice Shop inside Docker  
+- Automatically registering & logging in a new user  
+- Performing authenticated crawling using Katana  
+- Extracting all publicly accessible + authenticated URLs  
+- Saving results as artifacts for ZAP or other scanners  
+- Acting as a reusable DAST engine for any application  
 
-Prepare these URLs for vulnerability scanning using tools like ZAP
+---
 
-Build a reusable framework for testing other web applications
+## 1️⃣ Checkout Repository
 
-Workflow Description
+```yaml
+- name: Checkout Repo
+  uses: actions/checkout@v3
+```
 
-1️⃣ Checkout Repository
+---
 
-The workflow starts by checking out the repository to the GitHub Actions runner using:
+## 2️⃣ Start Juice Shop in Docker
 
-uses: actions/checkout@v4
-
-
-This ensures any scripts or configuration files are available to the runner.
-
-2️⃣ Start Juice Shop in Docker
-
-Juice Shop is run inside a Docker container:
-
+```bash
 docker run -d -p 3000:3000 --name juice-shop bkimminich/juice-shop
 sleep 20
+```
 
+- Juice Shop runs at **http://localhost:3000**
+- `sleep 20` ensures the app finishes booting
 
-Why Docker? Provides an isolated environment.
+---
 
-Why wait? Juice Shop needs time to fully start before crawling.
+## 3️⃣ Install Katana (JavaScript-aware crawler)
 
-3️⃣ Install Katana Crawler
+Katana crawls:
 
-We use Katana
- — a modern, JS-aware crawler that can:
+- HTML links  
+- JavaScript-embedded URLs  
+- XHR/fetch requests  
+- Angular/React/Vue routes  
+- Backend API endpoints  
 
-Parse HTML and JavaScript files
+Install command:
 
-Detect API endpoints
-
-Follow dynamic routes in single-page applications (SPAs)
-
-Installation:
-
+```bash
 wget https://github.com/projectdiscovery/katana/releases/download/v1.2.2/katana_1.2.2_linux_amd64.zip
 unzip -j katana_1.2.2_linux_amd64.zip katana -d /usr/local/bin
 chmod +x /usr/local/bin/katana
+```
 
-4️⃣ Auto-Register & Login
+⚠️ Katana v1.2.x uses:  
+`-H "Header: value"`  
+NOT `-header`.
 
-To maximize URL discovery, the workflow creates a new user dynamically and logs in:
+---
 
-Generate random email and password
+## 4️⃣ Auto‑Register & Auto‑Login
 
-Register via POST /api/Users
+The workflow:
 
-Login via POST /rest/user/login
+1. Generates random email/password
+2. Registers via `/api/Users`
+3. Logs in via `/rest/user/login`
+4. Extracts session cookie → stores in `AUTH_COOKIE`
 
-Capture the authentication cookie
+Example registration response:
 
-Why this step?
+```json
+{
+  "status": "success",
+  "data": {
+    "role": "customer",
+    "id": 23,
+    "email": "user123@test.com",
+    "isActive": true
+  }
+}
+```
 
-Enables crawling of authenticated-only endpoints
+Cookie saved in:
 
-Avoids using admin credentials (preserves them for brute force testing)
+```
+AUTH_COOKIE
+```
 
-Ensures the workflow is reusable for any web application with registration
+---
 
-5️⃣ Authenticated Crawling
+## 5️⃣ Authenticated Crawling with Katana
 
-Katana is run with the captured authentication cookie:
+```bash
+katana \
+  -u http://localhost:3000 \
+  -d 5 \
+  -jsl \
+  -H "Cookie: $AUTH_COOKIE" \
+  -silent \
+  -o discovered_urls.txt
+```
 
-katana -u http://localhost:3000 -d 5 -jsl -header "Cookie: $AUTH_COOKIE" -silent -o discovered_urls.txt
+### Flags explained:
 
+| Flag | Description |
+|------|-------------|
+| `-u` | Base URL |
+| `-d 5` | Crawl depth |
+| `-jsl` | JavaScript link parsing |
+| `-H` | HTTP header for cookie |
+| `-o` | Output file |
 
--d 5 → crawl depth
+### URLs found include:
 
--jsl → parse JavaScript links
+- Public pages → `/login`, `/register`
+- Auth pages → `/profile`, `/wallet`
+- Angular routes
+- Challenge routes
+- API endpoints → `/api/Users`, `/rest/products`
 
--header → include authentication cookie
+---
 
-Output saved to discovered_urls.txt
+## 6️⃣ Upload URL List Artifact
 
-What it discovers:
+```yaml
+- name: Upload discovered URLs
+  uses: actions/upload-artifact@v5
+  with:
+    name: discovered_urls
+    path: discovered_urls.txt
+```
 
-Front-end pages (e.g., /login, /basket, /score-board)
+This provides input for:
 
-REST API endpoints (e.g., /api/Users, /rest/products)
+- ZAP Full Scan  
+- Fuzzers  
+- Manual testing  
+- BurpSuite crawling seed  
 
-Protected routes (e.g., /profile, /wallet)
+---
 
-This ensures near-complete coverage of the application’s attack surface.
+## 📁 Example Output: discovered_urls.txt
 
-6️⃣ Upload Discovered URLs
+```
+/rest/user/change-password
+/rest/products/search
+/file-upload
+/basket
+/order-history
+/api/Feedbacks
+/api/Users
+/rest/admin
+/data-export
+/address/edit/
+```
 
-The output is uploaded as a GitHub artifact:
+---
 
-uses: actions/upload-artifact@v5
-with:
-  name: discovered_urls
-  path: discovered_urls.txt
+## 🧠 Why API URLs Appear
 
+Juice Shop is a **single-page Angular app**.  
+All actions call APIs.
 
-Ensures all discovered URLs are preserved for further analysis (e.g., feeding ZAP)
+Katana extracts:
 
-Benefits of This Approach
+- JS strings
+- fetch() calls
+- xhr.open()
+- Angular service URLs
+- Dynamic client-side routing
 
-Reusable: Can be adapted to any SPA with login/registration
+Thus you see:
 
-Comprehensive: Covers both public and authenticated URLs
+```
+/api/Users
+/api/Products
+/rest/user/login
+/rest/saveLoginIp
+```
 
-Automated: Runs fully in GitHub Actions
+This is correct.
 
-Safe: Does not expose admin credentials
+---
 
-Next Steps
+## 🔧 Troubleshooting
 
-Feed discovered_urls.txt into ZAP for full DAST scanning
+### ❗ Error: `flag provided but not defined: -header`
 
-Enable active scanning, fuzzing, and attack-mode on key endpoints
+Fix: use `-H` instead of `-header`.
 
-Analyze and report vulnerabilities, including SQLi, XSS, IDOR, and logic flaws
+Correct form:
 
-References
+```bash
+-H "Cookie: $AUTH_COOKIE"
+```
 
-https://owasp.org/www-project-juice-shop/
+---
 
-https://github.com/projectdiscovery/katana
+### ❗ Cookie Not Working
 
-https://www.zaproxy.org/docs/desktop/start/
+Test:
+
+```bash
+curl -i -H "Cookie: $AUTH_COOKIE" http://localhost:3000/rest/user/whoami
+```
+
+Expected:
+
+```
+200 OK
+{"user": "..."}
+```
+
+If 401 → login failed.
+
+---
+
+### ❗ Few URLs Found
+
+Fixes:
+
+- Increase crawl depth  
+  ```bash
+  -d 7
+  ```
+- Add more wait time  
+  ```bash
+  sleep 30
+  ```
+- Ensure cookie valid
+- Ensure JS parsing enabled
+
+---
+
+## 🚀 Next Steps
+
+- Use discovered_urls.txt → seed ZAP Full Scan  
+- Add fuzzing  
+- Add browser-driven injection attempts  
+- Convert workflow to a general-purpose DAST tool  
+- Make login paths dynamic for other apps  
+
+---
+
+## 📚 References
+
+- Juice Shop → https://owasp.org/www-project-juice-shop/  
+- Katana → https://github.com/projectdiscovery/katana  
+- ZAP → https://www.zaproxy.org/  
+- GitHub Actions → https://docs.github.com/en/actions  
+
+---
+```
+
