@@ -22,25 +22,21 @@ jobs:
           sleep 20
 
       # ---------------------------------------------------------
-      # 2. Install crawlergo
+      # 2. Install Katana (modern crawler)
       # ---------------------------------------------------------
-      - name: Install crawlergo
+      - name: Install Katana
         run: |
-          sudo apt-get update
-          sudo apt-get install -y chromium-browser
-          wget https://github.com/Qianlitp/crawlergo/releases/download/v0.4.4/crawlergo_linux_amd64
-          mv crawlergo_linux_amd64 crawlergo
-          chmod +x crawlergo
+          wget https://github.com/projectdiscovery/katana/releases/download/v1.0.6/katana_1.0.6_linux_amd64.zip
+          unzip katana_1.0.6_linux_amd64.zip
+          mv katana /usr/local/bin/katana
+          chmod +x /usr/local/bin/katana
 
       # ---------------------------------------------------------
-      # 3. Run crawlergo to discover URLs
+      # 3. Run katana and collect URLs
       # ---------------------------------------------------------
-      - name: Run crawlergo and collect URLs
+      - name: Run Katana URL Discovery
         run: |
-          ./crawlergo -o json http://localhost:3000 > crawl_output.json
-
-          # Extract URLs from crawlergo JSON
-          jq -r '.req_list[]?.url' crawl_output.json | sort -u > discovered_urls.txt
+          katana -u http://localhost:3000 -d 5 -jsl -silent -o discovered_urls.txt
 
           echo "Total discovered URLs:"
           wc -l discovered_urls.txt
@@ -51,7 +47,7 @@ jobs:
       # 4. Upload URL list as artifact
       # ---------------------------------------------------------
       - name: Upload discovered URLs
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v3
         with:
           name: discovered_urls
           path: discovered_urls.txt
