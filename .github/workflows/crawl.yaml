@@ -26,8 +26,8 @@ jobs:
       # ---------------------------------------------------------
       - name: Install Katana
         run: |
-          wget https://github.com/projectdiscovery/katana/releases/download/v1.0.6/katana_1.0.6_linux_amd64.zip
-          unzip katana_1.0.6_linux_amd64.zip
+          wget https://github.com/projectdiscovery/katana/releases/download/v1.2.2/katana_1.2.2_linux_amd64.zip
+          unzip katana_1.2.2_linux_amd64.zip
           mv katana /usr/local/bin/katana
           chmod +x /usr/local/bin/katana
 
