@@ -1,0 +1,57 @@
+name: Juice Shop URL Discovery
+
+on:
+  workflow_dispatch:
+
+jobs:
+  discover-urls:
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Checkout Repo
+        uses: actions/checkout@v3
+
+      # ---------------------------------------------------------
+      # 1. Start Juice Shop in Docker
+      # ---------------------------------------------------------
+      - name: Run Juice Shop in Docker
+        run: |
+          docker run -d -p 3000:3000 --name juice-shop bkimminich/juice-shop
+          echo "Waiting for Juice Shop to start..."
+          sleep 20
+
+      # ---------------------------------------------------------
+      # 2. Install crawlergo
+      # ---------------------------------------------------------
+      - name: Install crawlergo
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y chromium-browser
+          wget https://github.com/Qianlitp/crawlergo/releases/download/v0.4.4/crawlergo_linux_amd64
+          mv crawlergo_linux_amd64 crawlergo
+          chmod +x crawlergo
+
+      # ---------------------------------------------------------
+      # 3. Run crawlergo to discover URLs
+      # ---------------------------------------------------------
+      - name: Run crawlergo and collect URLs
+        run: |
+          ./crawlergo -o json http://localhost:3000 > crawl_output.json
+
+          # Extract URLs from crawlergo JSON
+          jq -r '.req_list[]?.url' crawl_output.json | sort -u > discovered_urls.txt
+
+          echo "Total discovered URLs:"
+          wc -l discovered_urls.txt
+          echo "---- Discovered URLs ----"
+          cat discovered_urls.txt
+
+      # ---------------------------------------------------------
+      # 4. Upload URL list as artifact
+      # ---------------------------------------------------------
+      - name: Upload discovered URLs
+        uses: actions/upload-artifact@v3
+        with:
+          name: discovered_urls
+          path: discovered_urls.txt
