@@ -2,6 +2,8 @@ name: Juice Shop URL Discovery
 
 on:
   workflow_dispatch:
+  push:
+  
 
 jobs:
   discover-urls:
@@ -10,7 +12,7 @@ jobs:
     steps:
 
       - name: Checkout Repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       # ---------------------------------------------------------
       # 1. Start Juice Shop in Docker
@@ -22,17 +24,16 @@ jobs:
           sleep 20
 
       # ---------------------------------------------------------
-      # 2. Install Katana (modern crawler)
+      # 2. Install Katana (clean extract only binary)
       # ---------------------------------------------------------
       - name: Install Katana
         run: |
           wget https://github.com/projectdiscovery/katana/releases/download/v1.2.2/katana_1.2.2_linux_amd64.zip
-          unzip katana_1.2.2_linux_amd64.zip
-          mv katana /usr/local/bin/katana
+          unzip -j katana_1.2.2_linux_amd64.zip katana -d /usr/local/bin
           chmod +x /usr/local/bin/katana
 
       # ---------------------------------------------------------
-      # 3. Run katana and collect URLs
+      # 3. Run Katana URL Discovery
       # ---------------------------------------------------------
       - name: Run Katana URL Discovery
         run: |
