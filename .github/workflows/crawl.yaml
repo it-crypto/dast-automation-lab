@@ -2,6 +2,7 @@ name: Juice Shop Authenticated URL Discovery
 
 on:
   workflow_dispatch:
+  push:
 
 jobs:
   auth-crawl:
