@@ -3,22 +3,31 @@
 This repository demonstrates automated Dynamic Application Security Testing (DAST) using **OWASP ZAP** and **GitHub Actions**.
 
 ## 📚 What’s Inside
-- 🔹 ZAP Baseline Scan (passive scan)
-- 🔹 ZAP Full Scan (active DAST)
-- 🔹 ZAP API Scan (OpenAPI-based)
+🔹 ZAP Baseline Scan (passive scan)
+
+🔹 ZAP Full Scan (active DAST)
+
+🔹 ZAP API Scan (OpenAPI-based)
 
 All scans generate HTML reports automatically.
 
 ## 📂 Repository Structure
 .github/workflows/
+
 ├── zap-baseline.yml
+
 ├── zap-fullscan.yml
+
 └── zap-api-scan.yml
 
 docs/
+
 ├── 01-introduction.md
+
 ├── 02-baseline-scan.md
+
 ├── 03-full-scan.md
+
 └── 04-api-scan.md
 
 
