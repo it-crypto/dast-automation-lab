@@ -47,7 +47,7 @@ jobs:
       # 4. Upload URL list as artifact
       # ---------------------------------------------------------
       - name: Upload discovered URLs
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v5
         with:
           name: discovered_urls
           path: discovered_urls.txt
