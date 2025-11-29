@@ -1,4 +1,4 @@
-name: Juice Shop Authenticated Crawl
+name: Juice Shop Authenticated URL Discovery
 
 on:
   workflow_dispatch:
@@ -9,20 +9,24 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+
+      # ---------------------------------------------------------
+      # 1. Checkout Repo
+      # ---------------------------------------------------------
       - name: Checkout Repo
         uses: actions/checkout@v3
 
       # ---------------------------------------------------------
-      # 1️⃣ Start Juice Shop in Docker
+      # 2. Start Juice Shop in Docker
       # ---------------------------------------------------------
-      - name: Run Juice Shop
+      - name: Run Juice Shop in Docker
         run: |
           docker run -d -p 3000:3000 --name juice-shop bkimminich/juice-shop
           echo "Waiting for Juice Shop to start..."
-          sleep 30  # ensure full startup
+          sleep 30  # wait for full boot
 
       # ---------------------------------------------------------
-      # 2️⃣ Install Katana
+      # 3. Install Katana (JS-aware crawler)
       # ---------------------------------------------------------
       - name: Install Katana
         run: |
@@ -31,7 +35,7 @@ jobs:
           chmod +x /usr/local/bin/katana
 
       # ---------------------------------------------------------
-      # 3️⃣ Auto Register & Login
+      # 4. Auto-register and login
       # ---------------------------------------------------------
       - name: Auto Register and Login
         id: auth
@@ -43,32 +47,41 @@ jobs:
           echo "PASSWORD=$PASSWORD" >> $GITHUB_ENV
 
           echo "Registering user: $EMAIL"
+
+          # Register user
           curl -s -X POST http://localhost:3000/api/Users \
             -H "Content-Type: application/json" \
             -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\",\"securityQuestion\":{\"id\":1,\"answer\":\"test\"}}" \
             > register_response.json
+
+          echo "Registration response:"
           cat register_response.json
 
           echo "Logging in..."
-          # Login and capture all cookies
+
+          # Login (capture full session cookie)
           AUTH_COOKIE=$(curl -i -s -X POST http://localhost:3000/rest/user/login \
             -H "Content-Type: application/json" \
             -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\"}" \
             | grep -i "set-cookie" \
-            | awk '{print $2}' \
-            | tr -d '\r\n' \
-            | tr '\n' ';')
+            | awk -F': ' '{print $2}' \
+            | tr -d '\r' \
+            | paste -sd '; ' -)
+
           echo "AUTH_COOKIE=$AUTH_COOKIE" >> $GITHUB_ENV
+          echo "Captured Cookie:"
+          echo "$AUTH_COOKIE"
 
           echo "Testing cookie with /rest/user/whoami"
           curl -i -H "Cookie: $AUTH_COOKIE" http://localhost:3000/rest/user/whoami
 
       # ---------------------------------------------------------
-      # 4️⃣ Run Katana Authenticated Crawl
+      # 5. Run Katana with authenticated session
       # ---------------------------------------------------------
-      - name: Run Katana Authenticated Discovery
+      - name: Run Katana AUTHENTICATED Discovery
         run: |
-          echo "Using Cookie: $AUTH_COOKIE"
+          echo "Using Cookie:"
+          echo "$AUTH_COOKIE"
 
           katana \
             -u http://localhost:3000 \
@@ -76,6 +89,7 @@ jobs:
             -jsl \
             -H "Cookie: $AUTH_COOKIE" \
             -silent \
+            -wait 3 \
             -o discovered_urls.txt
 
           echo "Total URLs discovered:"
@@ -85,9 +99,9 @@ jobs:
           cat discovered_urls.txt
 
       # ---------------------------------------------------------
-      # 5️⃣ Upload discovered URLs as artifact
+      # 6. Upload Discovered URLs as Artifact
       # ---------------------------------------------------------
-      - name: Upload Discovered URLs
+      - name: Upload discovered URLs
         uses: actions/upload-artifact@v5
         with:
           name: discovered_urls
