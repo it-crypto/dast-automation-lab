@@ -1,31 +1,31 @@
-name: Juice Shop Full DAST Crawl
+name: Maximal DAST Workflow
 
 on:
   workflow_dispatch:
   push:
 
 jobs:
-  full-crawl:
+  dast-crawl:
     runs-on: ubuntu-latest
 
     steps:
       # ---------------------------------------------------------
-      # 1. Checkout Repository
+      # 1. Checkout repository
       # ---------------------------------------------------------
-      - name: Checkout Repository
+      - name: Checkout Repo
         uses: actions/checkout@v3
 
       # ---------------------------------------------------------
-      # 2. Start Juice Shop in Docker
+      # 2. Start target app (Juice Shop example)
       # ---------------------------------------------------------
-      - name: Run Juice Shop in Docker
+      - name: Run Target Application
         run: |
           docker run -d -p 3000:3000 --name juice-shop bkimminich/juice-shop
-          echo "Waiting for Juice Shop to fully start..."
+          echo "Waiting for application to start..."
           sleep 30
 
       # ---------------------------------------------------------
-      # 3. Install Katana
+      # 3. Install Katana crawler
       # ---------------------------------------------------------
       - name: Install Katana
         run: |
@@ -34,17 +34,7 @@ jobs:
           chmod +x /usr/local/bin/katana
 
       # ---------------------------------------------------------
-      # 4. Crawl Unauthenticated URLs (GET + JS-aware)
-      # ---------------------------------------------------------
-      - name: Crawl Unauthenticated
-        run: |
-          echo "Crawling unauthenticated URLs (GET + JS routes)..."
-          katana -u http://localhost:3000 -d 7 -jsl -silent -o unauthenticated_urls.txt
-          echo "Unauthenticated URL count:"
-          wc -l unauthenticated_urls.txt
-
-      # ---------------------------------------------------------
-      # 5. Auto-register and login
+      # 4. Register & login to get JWT
       # ---------------------------------------------------------
       - name: Auto Register & Login
         id: auth
@@ -54,79 +44,85 @@ jobs:
           echo "EMAIL=$EMAIL" >> $GITHUB_ENV
           echo "PASSWORD=$PASSWORD" >> $GITHUB_ENV
 
-          # Register
           curl -s -X POST http://localhost:3000/api/Users \
             -H "Content-Type: application/json" \
-            -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\",\"securityQuestion\":{\"id\":1,\"answer\":\"test\"}}" \
-            > register_response.json
-          cat register_response.json
+            -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\",\"securityQuestion\":{\"id\":1,\"answer\":\"test\"}}" > /dev/null
 
-          # Login to get JWT
           TOKEN=$(curl -s -X POST http://localhost:3000/rest/user/login \
             -H "Content-Type: application/json" \
             -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\"}" \
             | jq -r '.authentication.token')
           echo "TOKEN=$TOKEN" >> $GITHUB_ENV
 
-          # Quick JWT check
+          # Quick test
           curl -i -H "Authorization: Bearer $TOKEN" http://localhost:3000/rest/user/whoami
 
       # ---------------------------------------------------------
-      # 6. Crawl Authenticated URLs (GET + JS-aware)
+      # 5. Crawl unauthenticated routes
       # ---------------------------------------------------------
-      - name: Crawl Authenticated
+      - name: Crawl Unauthenticated Routes
         run: |
-          echo "Crawling authenticated URLs..."
-          katana -u http://localhost:3000 -d 7 -jsl -silent \
-            -H "Authorization: Bearer $TOKEN" \
-            -o authenticated_urls.txt
+          touch unauthenticated_urls.txt
+          katana -u http://localhost:3000 -d 7 -jsl -silent -o unauthenticated_urls.txt || true
+          echo "Unauthenticated URL count:"
+          wc -l unauthenticated_urls.txt
+
+      # ---------------------------------------------------------
+      # 6. Crawl authenticated routes
+      # ---------------------------------------------------------
+      - name: Crawl Authenticated Routes
+        run: |
+          touch authenticated_urls.txt
+          katana -u http://localhost:3000 -d 7 -jsl -silent -H "Authorization: Bearer $TOKEN" -o authenticated_urls.txt || true
           echo "Authenticated URL count:"
           wc -l authenticated_urls.txt
 
       # ---------------------------------------------------------
-      # 7. POST endpoint discovery (manual form + API)
+      # 7. Extract URLs from JS / static assets (SPAs)
       # ---------------------------------------------------------
-      - name: Discover POST-only endpoints
+      - name: Extract JS / Asset URLs
         run: |
-          echo "Adding common POST endpoints..."
-          cat <<EOF > post_endpoints.txt
-          http://localhost:3000/rest/user/change-password
-          http://localhost:3000/rest/user/reset-password
-          http://localhost:3000/rest/continue-code/apply/
-          http://localhost:3000/rest/continue-code-findIt/apply/
-          http://localhost:3000/rest/continue-code-fixIt/apply/
-          http://localhost:3000/rest/order-history
-          http://localhost:3000/rest/user/security-question?email=$EMAIL
-          http://localhost:3000/rest/saveLoginIp
-          EOF
-          echo "POST endpoints count:"
-          wc -l post_endpoints.txt
+          mkdir -p js_urls
+          echo "Downloading main JS/CSS assets..."
+          wget -q -O main.js http://localhost:3000/main.js || true
+          wget -q -O runtime.js http://localhost:3000/runtime.js || true
+          wget -q -O polyfills.js http://localhost:3000/polyfills.js || true
+          wget -q -O vendor.js http://localhost:3000/vendor.js || true
+
+          # Extract HTTP/HTTPS endpoints from JS files
+          grep -Eo 'https?://[a-zA-Z0-9./?=_-]+' *.js 2>/dev/null > js_urls.txt || true
+          grep -Eo '/[a-zA-Z0-9./?=_-]+' *.js 2>/dev/null >> js_urls.txt || true
+
+          # Combine & deduplicate JS URLs
+          sort -u js_urls.txt > js_urls_unique.txt
+          echo "Extracted JS/static URLs:"
+          wc -l js_urls_unique.txt
 
       # ---------------------------------------------------------
-      # 8. Combine all URLs & filter authenticated-only
+      # 8. Combine all URLs safely
       # ---------------------------------------------------------
-      - name: Combine and Filter Authenticated-only URLs
+      - name: Combine All URLs
         run: |
-          cat unauthenticated_urls.txt authenticated_urls.txt post_endpoints.txt | sort -u > all_urls.txt
-          echo "Total unique URLs:"
+          touch unauthenticated_urls.txt authenticated_urls.txt js_urls_unique.txt
+          cat unauthenticated_urls.txt authenticated_urls.txt js_urls_unique.txt 2>/dev/null | sort -u > all_urls.txt
+          echo "Total unique URLs discovered:"
           wc -l all_urls.txt
 
-          # Authenticated-only
-          grep -Fxv -f unauthenticated_urls.txt authenticated_urls.txt > auth_only_urls.txt
+          # Authenticated-only URLs
+          grep -Fxv -f unauthenticated_urls.txt authenticated_urls.txt || true > auth_only_urls.txt
           echo "Authenticated-only URLs:"
           wc -l auth_only_urls.txt
-          cat auth_only_urls.txt
 
       # ---------------------------------------------------------
-      # 9. Upload all URL artifacts
+      # 9. Upload URL artifacts
       # ---------------------------------------------------------
       - name: Upload URL Artifacts
         uses: actions/upload-artifact@v5
         with:
-          name: juice-shop-urls
+          name: dast-urls
           path: |
             unauthenticated_urls.txt
             authenticated_urls.txt
             auth_only_urls.txt
-            post_endpoints.txt
+            js_urls_unique.txt
             all_urls.txt
