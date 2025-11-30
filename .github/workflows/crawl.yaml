@@ -121,16 +121,19 @@ jobs:
       # ---------------------------------------------------------
       # 9. ZAP FULL SCAN (normal DAST)
       # ---------------------------------------------------------
-      - name: ZAP Full Scan
+      - name: Run ZAP Full Scan Authenticated
         uses: zaproxy/action-full-scan@v0.13.0
+        env:
+          ZAP_AUTH_HEADER: "Authorization"
+          ZAP_AUTH_HEADER_VALUE: "Bearer ${{ env.TOKEN }}"
+          ZAP_AUTH_HEADER_SITE: "http://localhost:3000"
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          target: http://localhost:3000
-          cmd_options: "auto -config api.key=12345"
-          allow_issue_writing: false
+          target: "http://localhost:3000"
+          cmd_options: "-j -a -d"
           fail_action: false
-          artifact_name: zap_fullscan_report
-
+          allow_issue_writing: false
+          artifact_name: zap_fullscan_auth_report
 
       # ---------------------------------------------------------
       # 10. ZAP API SCAN (using authenticated URLs only)
