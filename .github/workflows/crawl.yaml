@@ -90,15 +90,15 @@ jobs:
         run: |
           echo "Adding common POST endpoints..."
           cat <<EOF > post_endpoints.txt
-http://localhost:3000/rest/user/change-password
-http://localhost:3000/rest/user/reset-password
-http://localhost:3000/rest/continue-code/apply/
-http://localhost:3000/rest/continue-code-findIt/apply/
-http://localhost:3000/rest/continue-code-fixIt/apply/
-http://localhost:3000/rest/order-history
-http://localhost:3000/rest/user/security-question?email=$EMAIL
-http://localhost:3000/rest/saveLoginIp
-EOF
+          http://localhost:3000/rest/user/change-password
+          http://localhost:3000/rest/user/reset-password
+          http://localhost:3000/rest/continue-code/apply/
+          http://localhost:3000/rest/continue-code-findIt/apply/
+          http://localhost:3000/rest/continue-code-fixIt/apply/
+          http://localhost:3000/rest/order-history
+          http://localhost:3000/rest/user/security-question?email=$EMAIL
+          http://localhost:3000/rest/saveLoginIp
+          EOF
           echo "POST endpoints count:"
           wc -l post_endpoints.txt
 
