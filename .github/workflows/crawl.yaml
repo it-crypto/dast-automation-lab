@@ -1,128 +1,92 @@
-name: Maximal DAST Workflow
+name: Juice Shop DAST Full Scan
 
 on:
-  workflow_dispatch:
   push:
+    branches: [main]
+  workflow_dispatch:
 
 jobs:
-  dast-crawl:
+  dast:
     runs-on: ubuntu-latest
+    env:
+      APP_URL: http://localhost:3000
+      DB_FILE: /tmp/juice-shop.db
 
     steps:
-      # ---------------------------------------------------------
-      # 1. Checkout repository
-      # ---------------------------------------------------------
-      - name: Checkout Repo
+      # 1. Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v3
 
-      # ---------------------------------------------------------
-      # 2. Start target app (Juice Shop example)
-      # ---------------------------------------------------------
-      - name: Run Target Application
+      # 2. Start Juice Shop in Docker
+      - name: Start Juice Shop
         run: |
-          docker run -d -p 3000:3000 --name juice-shop bkimminich/juice-shop
-          echo "Waiting for application to start..."
-          sleep 30
+          docker run -d --rm --name juice-shop -p 3000:3000 \
+            bkimminich/juice-shop:latest
+          # wait until Juice Shop is ready
+          echo "Waiting for Juice Shop to be ready..."
+          for i in {1..30}; do
+            curl -s $APP_URL > /dev/null && break || sleep 2
+          done
 
-      # ---------------------------------------------------------
-      # 3. Install Katana crawler
-      # ---------------------------------------------------------
-      - name: Install Katana
+      # 3. Register & login user, get JWT token
+      - name: Register and login test user
         run: |
-          wget https://github.com/projectdiscovery/katana/releases/download/v1.2.2/katana_1.2.2_linux_amd64.zip
-          unzip -j katana_1.2.2_linux_amd64.zip katana -d /usr/local/bin
-          chmod +x /usr/local/bin/katana
-
-      # ---------------------------------------------------------
-      # 4. Register & login to get JWT
-      # ---------------------------------------------------------
-      - name: Auto Register & Login
-        id: auth
-        run: |
-          EMAIL="user$(date +%s)@test.com"
-          PASSWORD="Passw0rd!"
-          echo "EMAIL=$EMAIL" >> $GITHUB_ENV
-          echo "PASSWORD=$PASSWORD" >> $GITHUB_ENV
-
-          curl -s -X POST http://localhost:3000/api/Users \
+          export EMAIL="ci-user@example.com"
+          export PASSWORD="ciUserPass123!"
+          # Registration (ignore if exists)
+          curl -s -X POST "$APP_URL/rest/user" \
             -H "Content-Type: application/json" \
-            -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\",\"securityQuestion\":{\"id\":1,\"answer\":\"test\"}}" > /dev/null
-
-          TOKEN=$(curl -s -X POST http://localhost:3000/rest/user/login \
+            -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\",\"passwordRepeat\":\"$PASSWORD\",\"securityQuestion\":\"Your favorite color?\",\"securityAnswer\":\"blue\"}" || true
+          # Login to get JWT
+          TOKEN=$(curl -s -X POST "$APP_URL/rest/user/login" \
             -H "Content-Type: application/json" \
-            -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\"}" \
-            | jq -r '.authentication.token')
+            -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\"}" | jq -r '.authentication.token')
           echo "TOKEN=$TOKEN" >> $GITHUB_ENV
 
-          # Quick test
-          curl -i -H "Authorization: Bearer $TOKEN" http://localhost:3000/rest/user/whoami
-
-      # ---------------------------------------------------------
-      # 5. Crawl unauthenticated routes
-      # ---------------------------------------------------------
-      - name: Crawl Unauthenticated Routes
+      # 4. Sanity check for protected endpoints
+      - name: Sanity check authenticated endpoints
         run: |
-          touch unauthenticated_urls.txt
-          katana -u http://localhost:3000 -d 7 -jsl -silent -o unauthenticated_urls.txt || true
-          echo "Unauthenticated URL count:"
-          wc -l unauthenticated_urls.txt
+          for endpoint in /rest/user/whoami /rest/order-history; do
+            status=$(curl -s -o /dev/null -w "%{http_code}" \
+              -H "Authorization: Bearer $TOKEN" "$APP_URL$endpoint")
+            if [[ "$status" == "401" ]]; then
+              echo "ERROR: $endpoint returned 401, authentication failed"
+              exit 1
+            else
+              echo "$endpoint accessible, status $status"
+            fi
+          done
 
-      # ---------------------------------------------------------
-      # 6. Crawl authenticated routes
-      # ---------------------------------------------------------
-      - name: Crawl Authenticated Routes
+      # 5. Crawl unauthenticated URLs
+      - name: Crawl unauthenticated URLs
         run: |
-          touch authenticated_urls.txt
-          katana -u http://localhost:3000 -d 7 -jsl -silent -H "Authorization: Bearer $TOKEN" -o authenticated_urls.txt || true
-          echo "Authenticated URL count:"
-          wc -l authenticated_urls.txt
+          katana -u $APP_URL -d 5 -jsl -silent -o unauthenticated_urls.txt || true
+          echo "Unauthenticated URLs count: $(wc -l < unauthenticated_urls.txt)"
 
-      # ---------------------------------------------------------
-      # 7. Extract URLs from JS / static assets (SPAs)
-      # ---------------------------------------------------------
-      - name: Extract JS / Asset URLs
+      # 6. Crawl authenticated URLs
+      - name: Crawl authenticated URLs
         run: |
-          mkdir -p js_urls
-          echo "Downloading main JS/CSS assets..."
-          wget -q -O main.js http://localhost:3000/main.js || true
-          wget -q -O runtime.js http://localhost:3000/runtime.js || true
-          wget -q -O polyfills.js http://localhost:3000/polyfills.js || true
-          wget -q -O vendor.js http://localhost:3000/vendor.js || true
+          katana -u $APP_URL -d 5 -jsl -silent \
+            -H "Authorization: Bearer $TOKEN" \
+            -o authenticated_urls.txt || true
+          echo "Authenticated URLs count: $(wc -l < authenticated_urls.txt)"
 
-          # Extract HTTP/HTTPS endpoints from JS files
-          grep -Eo 'https?://[a-zA-Z0-9./?=_-]+' *.js 2>/dev/null > js_urls.txt || true
-          grep -Eo '/[a-zA-Z0-9./?=_-]+' *.js 2>/dev/null >> js_urls.txt || true
-
-          # Combine & deduplicate JS URLs
-          sort -u js_urls.txt > js_urls_unique.txt
-          echo "Extracted JS/static URLs:"
-          wc -l js_urls_unique.txt
-
-      # ---------------------------------------------------------
-      # 8. Combine all URLs safely
-      # ---------------------------------------------------------
-      - name: Combine All URLs
+      # 7. Merge & filter real URLs
+      - name: Combine real URLs
         run: |
-          touch unauthenticated_urls.txt authenticated_urls.txt js_urls_unique.txt
-          cat unauthenticated_urls.txt authenticated_urls.txt js_urls_unique.txt 2>/dev/null | sort -u > all_urls.txt
-          echo "Total unique URLs discovered:"
-          wc -l all_urls.txt
+          cat unauthenticated_urls.txt authenticated_urls.txt | \
+            grep -E '^https?://' | sort -u > all_urls.txt
+          echo "Total unique real URLs: $(wc -l < all_urls.txt)"
 
-          # Authenticated-only URLs
-          grep -Fxv -f unauthenticated_urls.txt authenticated_urls.txt || true > auth_only_urls.txt
-          echo "Authenticated-only URLs:"
-          wc -l auth_only_urls.txt
+      # 8. Run OWASP ZAP full scan using discovered URLs
+      - name: Run OWASP ZAP Full Scan
+        run: |
+          docker run -v $(pwd):/zap/wrk/:rw -t owasp/zap2docker-stable \
+            zap-full-scan.py -t $APP_URL -r zap_report.html -u all_urls.txt || true
 
-      # ---------------------------------------------------------
-      # 9. Upload URL artifacts
-      # ---------------------------------------------------------
-      - name: Upload URL Artifacts
+      # 9. Upload ZAP report as artifact
+      - name: Upload ZAP report
         uses: actions/upload-artifact@v5
         with:
-          name: dast-urls
-          path: |
-            unauthenticated_urls.txt
-            authenticated_urls.txt
-            auth_only_urls.txt
-            js_urls_unique.txt
-            all_urls.txt
+          name: zap-report
+          path: zap_report.html
