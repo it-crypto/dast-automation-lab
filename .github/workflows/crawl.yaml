@@ -1,11 +1,11 @@
-name: Juice Shop Authenticated URL Discovery
+name: Juice Shop Full DAST Crawl
 
 on:
   workflow_dispatch:
   push:
 
 jobs:
-  auth-crawl:
+  full-crawl:
     runs-on: ubuntu-latest
 
     steps:
@@ -21,11 +21,11 @@ jobs:
       - name: Run Juice Shop in Docker
         run: |
           docker run -d -p 3000:3000 --name juice-shop bkimminich/juice-shop
-          echo "Waiting for Juice Shop to start..."
-          sleep 20
+          echo "Waiting for Juice Shop to fully start..."
+          sleep 30
 
       # ---------------------------------------------------------
-      # 3. Install Katana (JS-aware Web Crawler)
+      # 3. Install Katana
       # ---------------------------------------------------------
       - name: Install Katana
         run: |
@@ -34,66 +34,99 @@ jobs:
           chmod +x /usr/local/bin/katana
 
       # ---------------------------------------------------------
-      # 4. Auto-register and login to get JWT
+      # 4. Crawl Unauthenticated URLs (GET + JS-aware)
       # ---------------------------------------------------------
-      - name: Auto Register and Login (JWT)
+      - name: Crawl Unauthenticated
+        run: |
+          echo "Crawling unauthenticated URLs (GET + JS routes)..."
+          katana -u http://localhost:3000 -d 7 -jsl -silent -o unauthenticated_urls.txt
+          echo "Unauthenticated URL count:"
+          wc -l unauthenticated_urls.txt
+
+      # ---------------------------------------------------------
+      # 5. Auto-register and login
+      # ---------------------------------------------------------
+      - name: Auto Register & Login
         id: auth
         run: |
-          # Generate random user
           EMAIL="user$(date +%s)@test.com"
           PASSWORD="Passw0rd!"
           echo "EMAIL=$EMAIL" >> $GITHUB_ENV
           echo "PASSWORD=$PASSWORD" >> $GITHUB_ENV
 
-          echo "Registering user: $EMAIL"
-
-          # Register user
+          # Register
           curl -s -X POST http://localhost:3000/api/Users \
             -H "Content-Type: application/json" \
             -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\",\"securityQuestion\":{\"id\":1,\"answer\":\"test\"}}" \
             > register_response.json
-
-          echo "Registration response:"
           cat register_response.json
 
-          # Login and extract JWT token
+          # Login to get JWT
           TOKEN=$(curl -s -X POST http://localhost:3000/rest/user/login \
             -H "Content-Type: application/json" \
-            -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\",\"totpToken\":\"\"}" \
+            -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\"}" \
             | jq -r '.authentication.token')
-
-          echo "JWT TOKEN: $TOKEN"
           echo "TOKEN=$TOKEN" >> $GITHUB_ENV
 
-          # Debug: check authenticated user
-          echo "Testing /rest/user/whoami with JWT"
+          # Quick JWT check
           curl -i -H "Authorization: Bearer $TOKEN" http://localhost:3000/rest/user/whoami
 
       # ---------------------------------------------------------
-      # 5. Run Katana crawler with JWT
+      # 6. Crawl Authenticated URLs (GET + JS-aware)
       # ---------------------------------------------------------
-      - name: Run Katana AUTHENTICATED Discovery
+      - name: Crawl Authenticated
         run: |
-          echo "Running Katana with JWT authentication..."
-          katana \
-            -u http://localhost:3000 \
-            -d 7 \
-            -jsl \
+          echo "Crawling authenticated URLs..."
+          katana -u http://localhost:3000 -d 7 -jsl -silent \
             -H "Authorization: Bearer $TOKEN" \
-            -silent \
-            -o discovered_urls.txt
-
-          echo "Total URLs discovered:"
-          wc -l discovered_urls.txt
-
-          echo "---- AUTHENTICATED URLs ----"
-          cat discovered_urls.txt
+            -o authenticated_urls.txt
+          echo "Authenticated URL count:"
+          wc -l authenticated_urls.txt
 
       # ---------------------------------------------------------
-      # 6. Upload discovered URLs as artifact
+      # 7. POST endpoint discovery (manual form + API)
       # ---------------------------------------------------------
-      - name: Upload Discovered URLs
+      - name: Discover POST-only endpoints
+        run: |
+          echo "Adding common POST endpoints..."
+          cat <<EOF > post_endpoints.txt
+http://localhost:3000/rest/user/change-password
+http://localhost:3000/rest/user/reset-password
+http://localhost:3000/rest/continue-code/apply/
+http://localhost:3000/rest/continue-code-findIt/apply/
+http://localhost:3000/rest/continue-code-fixIt/apply/
+http://localhost:3000/rest/order-history
+http://localhost:3000/rest/user/security-question?email=$EMAIL
+http://localhost:3000/rest/saveLoginIp
+EOF
+          echo "POST endpoints count:"
+          wc -l post_endpoints.txt
+
+      # ---------------------------------------------------------
+      # 8. Combine all URLs & filter authenticated-only
+      # ---------------------------------------------------------
+      - name: Combine and Filter Authenticated-only URLs
+        run: |
+          cat unauthenticated_urls.txt authenticated_urls.txt post_endpoints.txt | sort -u > all_urls.txt
+          echo "Total unique URLs:"
+          wc -l all_urls.txt
+
+          # Authenticated-only
+          grep -Fxv -f unauthenticated_urls.txt authenticated_urls.txt > auth_only_urls.txt
+          echo "Authenticated-only URLs:"
+          wc -l auth_only_urls.txt
+          cat auth_only_urls.txt
+
+      # ---------------------------------------------------------
+      # 9. Upload all URL artifacts
+      # ---------------------------------------------------------
+      - name: Upload URL Artifacts
         uses: actions/upload-artifact@v5
         with:
-          name: discovered_urls
-          path: discovered_urls.txt
+          name: juice-shop-urls
+          path: |
+            unauthenticated_urls.txt
+            authenticated_urls.txt
+            auth_only_urls.txt
+            post_endpoints.txt
+            all_urls.txt
