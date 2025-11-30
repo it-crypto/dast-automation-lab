@@ -124,10 +124,11 @@ jobs:
       - name: ZAP Full Scan
         uses: zaproxy/action-full-scan@v0.13.0
         with:
+          token: ${{ secrets.GITHUB_TOKEN }}
           target: http://localhost:3000
+          cmd_options: "-config api.key=12345"
           allow_issue_writing: false
           fail_action: false
-          cmd_options: "-config api.key=12345"
           artifact_name: zap_fullscan_report
 
 
@@ -137,6 +138,7 @@ jobs:
       - name: ZAP API Scan
         uses: zaproxy/action-api-scan@v0.10.0
         with:
+          token: ${{ secrets.GITHUB_TOKEN }}
           target: http://localhost:3000
           apis: authenticated_urls.txt
           allow_issue_writing: false
