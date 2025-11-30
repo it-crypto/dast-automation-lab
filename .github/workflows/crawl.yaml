@@ -1,103 +1,105 @@
-name: Juice Shop DAST Scan
+name: Maximal Authenticated DAST Workflow
 
 on:
   workflow_dispatch:
   push:
 
 jobs:
-  dast-crawl:
+  dast:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Repo
-        uses: actions/checkout@v3
+    # ---------------------------------------------------------
+    # 1. Checkout repository
+    # ---------------------------------------------------------
+    - name: Checkout Repo
+      uses: actions/checkout@v3
 
-      - name: Run Juice Shop
-        run: |
-          docker run -d -p 3000:3000 --name juice-shop bkimminich/juice-shop
-          echo "Waiting for application to start..."
-          sleep 30
+    # ---------------------------------------------------------
+    # 2. Start Juice Shop in Docker
+    # ---------------------------------------------------------
+    - name: Start Juice Shop
+      run: |
+        docker run -d -p 3000:3000 --name juice-shop bkimminich/juice-shop
+        echo "Waiting 30 sec for startup..."
+        sleep 30
 
-      - name: Install Katana
-        run: |
-          wget https://github.com/projectdiscovery/katana/releases/download/v1.2.2/katana_1.2.2_linux_amd64.zip
-          unzip -j katana_1.2.2_linux_amd64.zip katana -d /usr/local/bin
-          chmod +x /usr/local/bin/katana
+    # ---------------------------------------------------------
+    # 3. Install Katana
+    # ---------------------------------------------------------
+    - name: Install Katana
+      run: |
+        wget https://github.com/projectdiscovery/katana/releases/download/v1.2.2/katana_1.2.2_linux_amd64.zip
+        unzip -j katana_1.2.2_linux_amd64.zip katana -d /usr/local/bin
+        chmod +x /usr/local/bin/katana
 
-      - name: Auto Register & Login
-        id: auth
-        run: |
-          EMAIL="user$(date +%s)@test.com"
-          PASSWORD="Passw0rd!"
-          echo "EMAIL=$EMAIL" >> $GITHUB_ENV
-          echo "PASSWORD=$PASSWORD" >> $GITHUB_ENV
+    # ---------------------------------------------------------
+    # 4. Register + Login → get JWT
+    # ---------------------------------------------------------
+    - name: Register & Login
+      id: auth
+      run: |
+        EMAIL="user$(date +%s)@test.com"
+        PASSWORD="Passw0rd!"
 
-          curl -s -X POST http://localhost:3000/api/Users \
-            -H "Content-Type: application/json" \
-            -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\",\"securityQuestion\":{\"id\":1,\"answer\":\"test\"}}" > /dev/null
+        echo "EMAIL=$EMAIL" >> $GITHUB_ENV
 
-          TOKEN=$(curl -s -X POST http://localhost:3000/rest/user/login \
-            -H "Content-Type: application/json" \
-            -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\"}" \
-            | jq -r '.authentication.token')
-          echo "TOKEN=$TOKEN" >> $GITHUB_ENV
+        curl -s -X POST http://localhost:3000/api/Users \
+          -H "Content-Type: application/json" \
+          -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\",\"securityQuestion\":{\"id\":1,\"answer\":\"test\"}}" > /dev/null
 
-      - name: Crawl Unauthenticated Routes
-        run: |
-          katana -u http://localhost:3000 -d 7 -jsl -silent -o unauthenticated_urls.txt || true
-          wc -l unauthenticated_urls.txt
+        TOKEN=$(curl -s -X POST http://localhost:3000/rest/user/login \
+          -H "Content-Type: application/json" \
+          -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\"}" | jq -r '.authentication.token')
 
-      - name: Crawl Authenticated Routes
-        run: |
-          katana -u http://localhost:3000 -d 7 -jsl -silent -H "Authorization: Bearer $TOKEN" -o authenticated_urls.txt || true
-          wc -l authenticated_urls.txt
+        echo "TOKEN=$TOKEN" >> $GITHUB_ENV
 
-      - name: Extract JS / Asset URLs
-        run: |
-          for file in main.js runtime.js polyfills.js vendor.js; do
-            wget -q -O $file http://localhost:3000/$file || true
-          done
-          grep -Eo 'https?://[a-zA-Z0-9./?=_-]+' *.js 2>/dev/null > js_urls.txt || true
-          grep -Eo '/[a-zA-Z0-9./?=_-]+' *.js 2>/dev/null >> js_urls.txt || true
-          sort -u js_urls.txt > js_urls_unique.txt
-          wc -l js_urls_unique.txt
+    # ---------------------------------------------------------
+    # 5. Authenticated Crawl ONLY (the important part)
+    # ---------------------------------------------------------
+    - name: Katana Authenticated Crawl
+      run: |
+        katana \
+          -u http://localhost:3000 \
+          -H "Authorization: Bearer $TOKEN" \
+          -jsl \
+          -silent \
+          -d 7 \
+          -o authenticated_urls.txt || true
 
-      - name: Combine All URLs Correctly
-        run: |
-          cat unauthenticated_urls.txt authenticated_urls.txt js_urls_unique.txt 2>/dev/null | sort -u > all_urls.txt
-          echo "Total unique URLs discovered:"
-          wc -l all_urls.txt
+        echo "Authenticated URLs:"
+        wc -l authenticated_urls.txt
 
-          grep -Fxv -f unauthenticated_urls.txt authenticated_urls.txt > auth_only_urls.txt
-          echo "Authenticated-only URLs:"
-          wc -l auth_only_urls.txt
+    # ---------------------------------------------------------
+    # 6. Sanity check authentication works
+    # ---------------------------------------------------------
+    - name: Sanity Check Authenticated Endpoints
+      run: |
+        STATUS=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $TOKEN" http://localhost:3000/rest/user/whoami)
+        [ "$STATUS" -eq 200 ] && echo "whoami OK" || (echo "whoami FAILED: $STATUS"; exit 1)
 
-      - name: Sanity Check Authenticated Endpoints
-        run: |
-          set -e
-          echo "Checking /rest/user/whoami ..."
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $TOKEN" http://localhost:3000/rest/user/whoami)
-          if [ "$STATUS" -ne 200 ]; then
-            echo "Sanity check failed: /rest/user/whoami returned $STATUS"
-            exit 1
-          fi
-          echo "/rest/user/whoami returned 200 OK ✅"
+        STATUS=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $TOKEN" http://localhost:3000/rest/order-history)
+        [ "$STATUS" -eq 200 ] && echo "order-history OK" || (echo "order-history FAILED: $STATUS"; exit 1)
 
-          echo "Checking /rest/order-history ..."
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $TOKEN" http://localhost:3000/rest/order-history)
-          if [ "$STATUS" -ne 200 ]; then
-            echo "Sanity check failed: /rest/order-history returned $STATUS"
-            exit 1
-          fi
-          echo "/rest/order-history returned 200 OK ✅"
+    # ---------------------------------------------------------
+    # 7. Upload authenticated URLs as artifact
+    # ---------------------------------------------------------
+    - name: Upload Crawled URLs
+      uses: actions/upload-artifact@v5
+      with:
+        name: authenticated-urls
+        path: authenticated_urls.txt
 
-      - name: Upload URL Artifacts
-        uses: actions/upload-artifact@v5
-        with:
-          name: dast-urls
-          path: |
-            unauthenticated_urls.txt
-            authenticated_urls.txt
-            auth_only_urls.txt
-            js_urls_unique.txt
-            all_urls.txt
+    # ---------------------------------------------------------
+    # 8. ZAP FULL SCAN using authenticated URLs
+    # ---------------------------------------------------------
+    - name: Run ZAP Full Scan
+      uses: zaproxy/action-full-scan@v0.13.0
+      with:
+        target: http://localhost:3000
+        rules_file_name: ""
+        allow_issue_writing: false
+        cmd_options: "-zsp -config ajaxSpider.browserId=htmlunit -config api.key=12345 -config ajaxSpider.runOnlyLocal=true -config scanner.threadPerHost=3 -config view.mode=safe"
+        urls_file_name: authenticated_urls.txt
+        fail_action: false
+        artifact_name: zap_fullscan_report
