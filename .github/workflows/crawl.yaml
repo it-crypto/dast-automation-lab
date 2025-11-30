@@ -126,7 +126,7 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           target: http://localhost:3000
-          cmd_options: "-config api.key=12345"
+          cmd_options: "auto -config api.key=12345"
           allow_issue_writing: false
           fail_action: false
           artifact_name: zap_fullscan_report
