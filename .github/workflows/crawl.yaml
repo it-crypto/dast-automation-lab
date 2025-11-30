@@ -10,7 +10,7 @@ jobs:
 
     steps:
       # ---------------------------------------------------------
-      # 1. Checkout Repo
+      # 1. Checkout Repository
       # ---------------------------------------------------------
       - name: Checkout Repository
         uses: actions/checkout@v3
@@ -34,9 +34,9 @@ jobs:
           chmod +x /usr/local/bin/katana
 
       # ---------------------------------------------------------
-      # 4. Auto-register and login
+      # 4. Auto-register and login to get JWT
       # ---------------------------------------------------------
-      - name: Auto Register and Login
+      - name: Auto Register and Login (JWT)
         id: auth
         run: |
           # Generate random user
@@ -56,31 +56,30 @@ jobs:
           echo "Registration response:"
           cat register_response.json
 
-          echo "Logging in and capturing cookie..."
-
-          # Login and save cookie
-          curl -s -c cookie.txt -X POST http://localhost:3000/rest/user/login \
+          # Login and extract JWT token
+          TOKEN=$(curl -s -X POST http://localhost:3000/rest/user/login \
             -H "Content-Type: application/json" \
-            -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\"}"
+            -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\",\"totpToken\":\"\"}" \
+            | jq -r '.authentication.token')
 
-          echo "Testing cookie with /rest/user/whoami"
-          curl -i -b cookie.txt http://localhost:3000/rest/user/whoami
+          echo "JWT TOKEN: $TOKEN"
+          echo "TOKEN=$TOKEN" >> $GITHUB_ENV
+
+          # Debug: check authenticated user
+          echo "Testing /rest/user/whoami with JWT"
+          curl -i -H "Authorization: Bearer $TOKEN" http://localhost:3000/rest/user/whoami
 
       # ---------------------------------------------------------
-      # 5. Run Katana with authenticated session
+      # 5. Run Katana crawler with JWT
       # ---------------------------------------------------------
       - name: Run Katana AUTHENTICATED Discovery
         run: |
-          # Extract connect.sid cookie
-          COOKIE=$(cat cookie.txt | grep connect.sid | awk '{print $7"="$8}')
-          echo "Using Cookie: $COOKIE"
-
-          # Run Katana crawler
+          echo "Running Katana with JWT authentication..."
           katana \
             -u http://localhost:3000 \
             -d 7 \
             -jsl \
-            -H "Cookie: $COOKIE" \
+            -H "Authorization: Bearer $TOKEN" \
             -silent \
             -o discovered_urls.txt
 
