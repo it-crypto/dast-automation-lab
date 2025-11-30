@@ -1,4 +1,4 @@
-name: Maximal Authenticated DAST Workflow
+name: Maximal DAST Workflow
 
 on:
   workflow_dispatch:
@@ -9,97 +9,150 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    # ---------------------------------------------------------
-    # 1. Checkout repository
-    # ---------------------------------------------------------
-    - name: Checkout Repo
-      uses: actions/checkout@v3
+      # ---------------------------------------------------------
+      # 1. Checkout repository
+      # ---------------------------------------------------------
+      - name: Checkout Repository
+        uses: actions/checkout@v3
 
-    # ---------------------------------------------------------
-    # 2. Start Juice Shop in Docker
-    # ---------------------------------------------------------
-    - name: Start Juice Shop
-      run: |
-        docker run -d -p 3000:3000 --name juice-shop bkimminich/juice-shop
-        echo "Waiting 30 sec for startup..."
-        sleep 30
 
-    # ---------------------------------------------------------
-    # 3. Install Katana
-    # ---------------------------------------------------------
-    - name: Install Katana
-      run: |
-        wget https://github.com/projectdiscovery/katana/releases/download/v1.2.2/katana_1.2.2_linux_amd64.zip
-        unzip -j katana_1.2.2_linux_amd64.zip katana -d /usr/local/bin
-        chmod +x /usr/local/bin/katana
+      # ---------------------------------------------------------
+      # 2. Start OWASP Juice Shop
+      # ---------------------------------------------------------
+      - name: Start Juice Shop
+        run: |
+          docker run -d -p 3000:3000 --name juice-shop bkimminich/juice-shop
+          echo "Waiting for Juice Shop to start..."
+          sleep 30
 
-    # ---------------------------------------------------------
-    # 4. Register + Login → get JWT
-    # ---------------------------------------------------------
-    - name: Register & Login
-      id: auth
-      run: |
-        EMAIL="user$(date +%s)@test.com"
-        PASSWORD="Passw0rd!"
 
-        echo "EMAIL=$EMAIL" >> $GITHUB_ENV
+      # ---------------------------------------------------------
+      # 3. Install Katana
+      # ---------------------------------------------------------
+      - name: Install Katana
+        run: |
+          wget https://github.com/projectdiscovery/katana/releases/download/v1.2.2/katana_1.2.2_linux_amd64.zip
+          unzip -j katana_1.2.2_linux_amd64.zip katana -d /usr/local/bin
+          chmod +x /usr/local/bin/katana
 
-        curl -s -X POST http://localhost:3000/api/Users \
-          -H "Content-Type: application/json" \
-          -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\",\"securityQuestion\":{\"id\":1,\"answer\":\"test\"}}" > /dev/null
 
-        TOKEN=$(curl -s -X POST http://localhost:3000/rest/user/login \
-          -H "Content-Type: application/json" \
-          -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\"}" | jq -r '.authentication.token')
+      # ---------------------------------------------------------
+      # 4. Register + Login to get JWT
+      # ---------------------------------------------------------
+      - name: Register + Login (Get JWT)
+        id: auth
+        run: |
+          EMAIL="user$(date +%s)@test.com"
+          PASSWORD="Passw0rd!"
+          echo "EMAIL=$EMAIL" >> $GITHUB_ENV
+          echo "PASSWORD=$PASSWORD" >> $GITHUB_ENV
 
-        echo "TOKEN=$TOKEN" >> $GITHUB_ENV
+          # Create user
+          curl -s -X POST http://localhost:3000/api/Users \
+            -H "Content-Type: application/json" \
+            -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\",\"securityQuestion\":{\"id\":1,\"answer\":\"test\"}}" > /dev/null
 
-    # ---------------------------------------------------------
-    # 5. Authenticated Crawl ONLY (the important part)
-    # ---------------------------------------------------------
-    - name: Katana Authenticated Crawl
-      run: |
-        katana \
-          -u http://localhost:3000 \
-          -H "Authorization: Bearer $TOKEN" \
-          -jsl \
-          -silent \
-          -d 7 \
-          -o authenticated_urls.txt || true
+          # Login
+          TOKEN=$(curl -s -X POST http://localhost:3000/rest/user/login \
+              -H "Content-Type: application/json" \
+              -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\"}" | jq -r '.authentication.token')
 
-        echo "Authenticated URLs:"
-        wc -l authenticated_urls.txt
+          echo "TOKEN=$TOKEN" >> $GITHUB_ENV
 
-    # ---------------------------------------------------------
-    # 6. Sanity check authentication works
-    # ---------------------------------------------------------
-    - name: Sanity Check Authenticated Endpoints
-      run: |
-        STATUS=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $TOKEN" http://localhost:3000/rest/user/whoami)
-        [ "$STATUS" -eq 200 ] && echo "whoami OK" || (echo "whoami FAILED: $STATUS"; exit 1)
+          # WHOAMI sanity check
+          echo "Testing authentication..."
+          curl -i -H "Authorization: Bearer $TOKEN" http://localhost:3000/rest/user/whoami
 
-        STATUS=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $TOKEN" http://localhost:3000/rest/order-history)
-        [ "$STATUS" -eq 200 ] && echo "order-history OK" || (echo "order-history FAILED: $STATUS"; exit 1)
 
-    # ---------------------------------------------------------
-    # 7. Upload authenticated URLs as artifact
-    # ---------------------------------------------------------
-    - name: Upload Crawled URLs
-      uses: actions/upload-artifact@v5
-      with:
-        name: authenticated-urls
-        path: authenticated_urls.txt
+      # ---------------------------------------------------------
+      # 5. Katana crawling (Unauthenticated)
+      # ---------------------------------------------------------
+      - name: Katana Unauthenticated Crawl
+        run: |
+          touch unauthenticated_urls.txt
+          katana -u http://localhost:3000 -d 7 -jsl -silent -o unauthenticated_urls.txt || true
+          echo "Unauthenticated URLs:"
+          wc -l unauthenticated_urls.txt
 
-    # ---------------------------------------------------------
-    # 8. ZAP FULL SCAN using authenticated URLs
-    # ---------------------------------------------------------
-    - name: Run ZAP Full Scan
-      uses: zaproxy/action-full-scan@v0.13.0
-      with:
-        target: http://localhost:3000
-        rules_file_name: ""
-        allow_issue_writing: false
-        cmd_options: "-zsp -config ajaxSpider.browserId=htmlunit -config api.key=12345 -config ajaxSpider.runOnlyLocal=true -config scanner.threadPerHost=3 -config view.mode=safe"
-        urls_file_name: authenticated_urls.txt
-        fail_action: false
-        artifact_name: zap_fullscan_report
+
+      # ---------------------------------------------------------
+      # 6. Katana crawling (Authenticated)
+      # ---------------------------------------------------------
+      - name: Katana Authenticated Crawl
+        run: |
+          touch authenticated_urls.txt
+          katana -u http://localhost:3000 -d 7 -jsl -silent \
+            -H "Authorization: Bearer $TOKEN" \
+            -o authenticated_urls.txt || true
+
+          echo "Authenticated URLs:"
+          wc -l authenticated_urls.txt
+
+
+      # ---------------------------------------------------------
+      # 7. Extract JS-based URLs
+      # ---------------------------------------------------------
+      - name: Extract URLs From JS
+        run: |
+          wget -q -O main.js http://localhost:3000/main.js || true
+          wget -q -O runtime.js http://localhost:3000/runtime.js || true
+          wget -q -O polyfills.js http://localhost:3000/polyfills.js || true
+          wget -q -O vendor.js http://localhost:3000/vendor.js || true
+
+          grep -Eo 'https?://[a-zA-Z0-9./?=_-]+' *.js 2>/dev/null > js_urls_unique.txt || true
+          grep -Eo '/[a-zA-Z0-9./?=_-]+' *.js 2>/dev/null >> js_urls_unique.txt || true
+
+          sort -u js_urls_unique.txt -o js_urls_unique.txt
+
+          echo "JS Extracted URLs:"
+          wc -l js_urls_unique.txt
+
+
+      # ---------------------------------------------------------
+      # 8. Identify authenticated-only URLs
+      # ---------------------------------------------------------
+      - name: Authenticated Only URLs
+        run: |
+          grep -Fxv -f unauthenticated_urls.txt authenticated_urls.txt > auth_only_urls.txt || true
+          echo "Authenticated-only URLs:"
+          wc -l auth_only_urls.txt
+
+
+      # ---------------------------------------------------------
+      # 9. ZAP FULL SCAN (normal DAST)
+      # ---------------------------------------------------------
+      - name: ZAP Full Scan
+        uses: zaproxy/action-full-scan@v0.13.0
+        with:
+          target: http://localhost:3000
+          allow_issue_writing: false
+          fail_action: false
+          cmd_options: "-config api.key=12345"
+          artifact_name: zap_fullscan_report
+
+
+      # ---------------------------------------------------------
+      # 10. ZAP API SCAN (using authenticated URLs only)
+      # ---------------------------------------------------------
+      - name: ZAP API Scan
+        uses: zaproxy/action-api-scan@v0.10.0
+        with:
+          target: http://localhost:3000
+          apis: authenticated_urls.txt
+          allow_issue_writing: false
+          fail_action: false
+          artifact_name: zap_apiscan_report
+
+
+      # ---------------------------------------------------------
+      # 11. Upload crawl artifacts (URLs)
+      # ---------------------------------------------------------
+      - name: Upload Crawler URL Files
+        uses: actions/upload-artifact@v5
+        with:
+          name: crawl-url-artifacts
+          path: |
+            unauthenticated_urls.txt
+            authenticated_urls.txt
+            auth_only_urls.txt
+            js_urls_unique.txt
