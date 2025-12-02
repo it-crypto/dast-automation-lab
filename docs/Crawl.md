@@ -2,9 +2,7 @@
 
 ## Overview
 
-This repository contains a **Dynamic Application Security Testing (DAST)** workflow designed for the OWASP Juice Shop application.
-
-The workflow fully automates:
+This repository contains a **Dynamic Application Security Testing (DAST)** workflow designed for the OWASP Juice Shop application. The workflow fully automates:
 
 - Running Juice Shop inside Docker  
 - Automatically registering & logging in a new user  
@@ -28,11 +26,11 @@ The workflow fully automates:
 
 ```bash
 docker run -d -p 3000:3000 --name juice-shop bkimminich/juice-shop
-sleep 20
+sleep 30
 ```
 
-- Juice Shop runs at **http://localhost:3000**
-- `sleep 20` ensures the app finishes booting
+- Juice Shop runs at **http://localhost:3000**  
+- `sleep 30` ensures the app finishes booting
 
 ---
 
@@ -55,8 +53,7 @@ chmod +x /usr/local/bin/katana
 ```
 
 ⚠️ Katana v1.2.x uses:  
-`-H "Header: value"`  
-NOT `-header`.
+`-H "Header: value"` NOT `-header`.
 
 ---
 
@@ -67,82 +64,140 @@ The workflow:
 1. Generates random email/password
 2. Registers via `/api/Users`
 3. Logs in via `/rest/user/login`
-4. Extracts session cookie → stores in `AUTH_COOKIE`
+4. Extracts session JWT → stores in `TOKEN`
 
-Example registration response:
-
-```json
-{
-  "status": "success",
-  "data": {
-    "role": "customer",
-    "id": 23,
-    "email": "user123@test.com",
-    "isActive": true
-  }
-}
-```
-
-Cookie saved in:
-
-```
-AUTH_COOKIE
-```
-
----
-
-## 5️⃣ Authenticated Crawling with Katana
+Example registration request:
 
 ```bash
-katana \
-  -u http://localhost:3000 \
-  -d 5 \
-  -jsl \
-  -H "Cookie: $AUTH_COOKIE" \
-  -silent \
-  -o discovered_urls.txt
+curl -s -X POST http://localhost:3000/api/Users \
+  -H "Content-Type: application/json" \
+  -d '{"email":"user123@test.com","password":"Passw0rd!","securityQuestion":{"id":1,"answer":"test"}}'
 ```
 
-### Flags explained:
+Login request:
 
-| Flag | Description |
-|------|-------------|
-| `-u` | Base URL |
-| `-d 5` | Crawl depth |
-| `-jsl` | JavaScript link parsing |
-| `-H` | HTTP header for cookie |
-| `-o` | Output file |
+```bash
+TOKEN=$(curl -s -X POST http://localhost:3000/rest/user/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"user123@test.com","password":"Passw0rd!"}' | jq -r '.authentication.token')
+```
 
-### URLs found include:
+WHOAMI sanity check:
 
-- Public pages → `/login`, `/register`
-- Auth pages → `/profile`, `/wallet`
-- Angular routes
-- Challenge routes
-- API endpoints → `/api/Users`, `/rest/products`
+```bash
+curl -i -H "Authorization: Bearer $TOKEN" http://localhost:3000/rest/user/whoami
+```
+
+Expected response:
+
+```json
+200 OK
+{"email":"user123@test.com","role":"customer"}
+```
 
 ---
 
-## 6️⃣ Upload URL List Artifact
+## 5️⃣ Katana Crawling (Unauthenticated)
+
+```bash
+touch unauthenticated_urls.txt
+katana -u http://localhost:3000 -d 7 -jsl -silent -o unauthenticated_urls.txt || true
+wc -l unauthenticated_urls.txt
+```
+
+---
+
+## 6️⃣ Katana Crawling (Authenticated)
+
+```bash
+touch authenticated_urls.txt
+katana -u http://localhost:3000 -d 7 -jsl -silent \
+  -H "Authorization: Bearer $TOKEN" \
+  -o authenticated_urls.txt || true
+wc -l authenticated_urls.txt
+```
+
+---
+
+## 7️⃣ Extract JS-based URLs
+
+```bash
+wget -q -O main.js http://localhost:3000/main.js || true
+wget -q -O runtime.js http://localhost:3000/runtime.js || true
+wget -q -O polyfills.js http://localhost:3000/polyfills.js || true
+wget -q -O vendor.js http://localhost:3000/vendor.js || true
+
+grep -Eo 'https?://[a-zA-Z0-9./?=_-]+' *.js 2>/dev/null > js_urls_unique.txt || true
+grep -Eo '/[a-zA-Z0-9./?=_-]+' *.js 2>/dev/null >> js_urls_unique.txt || true
+
+sort -u js_urls_unique.txt -o js_urls_unique.txt
+wc -l js_urls_unique.txt
+```
+
+---
+
+## 8️⃣ Identify Authenticated-only URLs
+
+```bash
+grep -Fxv -f unauthenticated_urls.txt authenticated_urls.txt > auth_only_urls.txt || true
+wc -l auth_only_urls.txt
+```
+
+---
+
+## 9️⃣ ZAP FULL SCAN (Authenticated)
 
 ```yaml
-- name: Upload discovered URLs
-  uses: actions/upload-artifact@v5
+- name: Run ZAP Full Scan Authenticated
+  uses: zaproxy/action-full-scan@v0.13.0
+  env:
+    ZAP_AUTH_HEADER: "Authorization"
+    ZAP_AUTH_HEADER_VALUE: "Bearer ${{ env.TOKEN }}"
+    ZAP_AUTH_HEADER_SITE: "http://localhost:3000"
   with:
-    name: discovered_urls
-    path: discovered_urls.txt
+    token: ${{ secrets.GITHUB_TOKEN }}
+    target: "http://localhost:3000"
+    cmd_options: "-j -a -d"
+    fail_action: false
+    allow_issue_writing: false
+    artifact_name: zap_fullscan_auth_report
 ```
-
-This provides input for:
-
-- ZAP Full Scan  
-- Fuzzers  
-- Manual testing  
-- BurpSuite crawling seed  
 
 ---
 
-## 📁 Example Output: discovered_urls.txt
+## 10️⃣ ZAP API Scan (Authenticated URLs)
+
+```yaml
+- name: ZAP API Scan
+  uses: zaproxy/action-api-scan@v0.10.0
+  with:
+    token: ${{ secrets.GITHUB_TOKEN }}
+    target: http://localhost:3000
+    apis: authenticated_urls.txt
+    allow_issue_writing: false
+    fail_action: false
+    artifact_name: zap_apiscan_report
+```
+
+---
+
+## 11️⃣ Upload Crawl Artifacts
+
+```yaml
+- name: Upload Crawler URL Files
+  uses: actions/upload-artifact@v5
+  with:
+    name: crawl-url-artifacts
+    path: |
+      unauthenticated_urls.txt
+      authenticated_urls.txt
+      auth_only_urls.txt
+      js_urls_unique.txt
+```
+
+---
+
+## 📁 Example Output: authenticated_urls.txt
 
 ```
 /rest/user/change-password
@@ -159,99 +214,27 @@ This provides input for:
 
 ---
 
-## 🧠 Why API URLs Appear
-
-Juice Shop is a **single-page Angular app**.  
-All actions call APIs.
-
-Katana extracts:
-
-- JS strings
-- fetch() calls
-- xhr.open()
-- Angular service URLs
-- Dynamic client-side routing
-
-Thus you see:
-
-```
-/api/Users
-/api/Products
-/rest/user/login
-/rest/saveLoginIp
-```
-
-This is correct.
-
----
-
 ## 🔧 Troubleshooting
 
-### ❗ Error: `flag provided but not defined: -header`
-
-Fix: use `-H` instead of `-header`.
-
-Correct form:
-
-```bash
--H "Cookie: $AUTH_COOKIE"
-```
-
----
-
-### ❗ Cookie Not Working
-
-Test:
-
-```bash
-curl -i -H "Cookie: $AUTH_COOKIE" http://localhost:3000/rest/user/whoami
-```
-
-Expected:
-
-```
-200 OK
-{"user": "..."}
-```
-
-If 401 → login failed.
-
----
-
-### ❗ Few URLs Found
-
-Fixes:
-
-- Increase crawl depth  
-  ```bash
-  -d 7
-  ```
-- Add more wait time  
-  ```bash
-  sleep 30
-  ```
-- Ensure cookie valid
-- Ensure JS parsing enabled
+- **Katana `-H` flag:** Always use `-H "Header: value"`  
+- **401 on WHOAMI:** Check login token/cookie  
+- **Few URLs:** Increase depth (`-d 7`) and sleep time (`sleep 30`)  
+- **JS URLs missing:** Ensure `-jsl` flag and download main JS bundles
 
 ---
 
 ## 🚀 Next Steps
 
-- Use discovered_urls.txt → seed ZAP Full Scan  
-- Add fuzzing  
-- Add browser-driven injection attempts  
-- Convert workflow to a general-purpose DAST tool  
-- Make login paths dynamic for other apps  
+- Use `authenticated_urls.txt` → ZAP API scan  
+- Seed ZAP Full Scan with discovered URLs  
+- Integrate with other CI/CD pipelines  
+- Extend workflow to other apps  
 
 ---
 
 ## 📚 References
 
-- Juice Shop → https://owasp.org/www-project-juice-shop/  
-- Katana → https://github.com/projectdiscovery/katana  
-- ZAP → https://www.zaproxy.org/  
-- GitHub Actions → https://docs.github.com/en/actions  
-
----
-```
-
+- [OWASP Juice Shop](https://owasp.org/www-project-juice-shop/)  
+- [Katana Crawler](https://github.com/projectdiscovery/katana)  
+- [OWASP ZAP](https://www.zaproxy.org/)  
+- [GitHub Actions](https://docs.github.com/en/actions)
